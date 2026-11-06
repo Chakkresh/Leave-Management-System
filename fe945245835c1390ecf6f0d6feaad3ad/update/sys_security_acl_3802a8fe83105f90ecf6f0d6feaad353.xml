@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?><record_update table="sys_security_acl">
+    <sys_security_acl action="INSERT_OR_UPDATE">
+        <active>true</active>
+        <admin_overrides>true</admin_overrides>
+        <advanced>true</advanced>
+        <applies_to/>
+        <condition/>
+        <controlled_by_refs/>
+        <decision_type>allow</decision_type>
+        <description>Allow read for records in x_2132473_leave_0_leave_balance, if the ACL script returns true.</description>
+        <local_or_existing>Existing</local_or_existing>
+        <name>x_2132473_leave_0_leave_balance</name>
+        <operation display_value="read">read</operation>
+        <script><![CDATA[answer = false;
+
+// Administrator can view all leave balances
+if (gs.hasRole('x_2132473_leave_0.admin')) {
+    answer = true;
+}
+
+// Employee can view their own leave balance
+else if (gs.hasRole('x_2132473_leave_0.employee')) {
+    answer = current.getValue('employee') == getEmployeeId();
+}
+
+// Manager can view balances belonging to their team
+else if (gs.hasRole('x_2132473_leave_0.manager')) {
+    var employeeGR = new GlideRecord('x_2132473_leave_0_employee');
+
+    if (employeeGR.get(current.getValue('employee'))) {
+        var managerId = getEmployeeId();
+
+        answer = employeeGR.getValue('manager') == managerId;
+    }
+}
+
+function getEmployeeId() {
+    var emp = new GlideRecord('x_2132473_leave_0_employee');
+    emp.addQuery('user', gs.getUserID());
+    emp.addQuery('active', true);
+    emp.setLimit(1);
+    emp.query();
+
+    if (emp.next()) {
+        return emp.getUniqueValue();
+    }
+
+    return '';
+}]]></script>
+        <security_attribute/>
+        <sys_class_name>sys_security_acl</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2026-11-05 11:12:30</sys_created_on>
+        <sys_id>3802a8fe83105f90ecf6f0d6feaad353</sys_id>
+        <sys_mod_count>1</sys_mod_count>
+        <sys_name>x_2132473_leave_0_leave_balance</sys_name>
+        <sys_package display_value="Leave Management System" source="x_2132473_leave_0">fe945245835c1390ecf6f0d6feaad3ad</sys_package>
+        <sys_policy/>
+        <sys_scope display_value="Leave Management System">fe945245835c1390ecf6f0d6feaad3ad</sys_scope>
+        <sys_update_name>sys_security_acl_3802a8fe83105f90ecf6f0d6feaad353</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2026-11-05 11:12:30</sys_updated_on>
+        <type display_value="record">record</type>
+    </sys_security_acl>
+</record_update>

@@ -1,0 +1,4103 @@
+<?xml version="1.0" encoding="UTF-8"?><record_update table="sp_widget">
+    <sp_widget action="INSERT_OR_UPDATE">
+        <category>custom</category>
+        <client_script><![CDATA[
+
+function($scope) {
+
+    var c = this;
+
+    // ==========================================
+    // 1. INITIALIZATION
+    // ==========================================
+
+    c.activeTab = 'apply';
+
+    c.userName = 'Employee';
+    c.currentYear = new Date().getFullYear();
+
+    c.employeeFound = false;
+    c.employeeId = '';
+
+    c.leaveTypes = [];
+    c.leaveBalances = [];
+    c.myRequests = [];
+    c.teamApprovals = [];
+
+    // My Requests filters
+    c.requestSearch = '';
+    c.statusFilter = '';
+
+    // Team Approvals search
+    c.approvalSearch = '';
+
+    // Loading states
+    c.loading = false;
+    c.submitting = false;
+    c.processingApproval = false;
+
+    // Messages
+    c.successMessage = '';
+    c.errorMessage = '';
+    c.requestNumber = '';
+
+    // Working days
+    c.workingDays = 0;
+    c.dateError = '';
+
+    // Leave form
+    c.leaveForm = {
+        leaveType: '',
+        startDate: '',
+        endDate: '',
+        reason: ''
+    };
+
+
+    // ==========================================
+    // 2. LOAD SERVER DATA
+    // ==========================================
+
+    c.loadDashboardData = function(data) {
+
+        if (!data) {
+            return;
+        }
+
+        c.userName = data.userName || 'Employee';
+        c.employeeFound = data.employeeFound === true;
+        c.employeeId = data.employeeId || '';
+
+        c.leaveTypes = data.leaveTypes || [];
+        c.leaveBalances = data.leaveBalances || [];
+        c.myRequests = data.myRequests || [];
+        c.teamApprovals = data.teamApprovals || [];
+
+    };
+
+    c.loadDashboardData(c.data);
+
+
+    // ==========================================
+    // 3. CALENDAR
+    // ==========================================
+
+    c.calendarDate = new Date();
+
+    c.updateCalendarMonth = function() {
+
+        c.calendarMonth = c.calendarDate.toLocaleString(
+            'en-US',
+            {
+                month: 'long',
+                year: 'numeric'
+            }
+        );
+
+    };
+
+    c.updateCalendarMonth();
+
+
+    c.previousMonth = function() {
+
+        c.calendarDate = new Date(
+            c.calendarDate.getFullYear(),
+            c.calendarDate.getMonth() - 1,
+            1
+        );
+
+        c.updateCalendarMonth();
+
+    };
+
+
+    c.nextMonth = function() {
+
+        c.calendarDate = new Date(
+            c.calendarDate.getFullYear(),
+            c.calendarDate.getMonth() + 1,
+            1
+        );
+
+        c.updateCalendarMonth();
+
+    };
+
+
+    // ==========================================
+    // 4. DATE NORMALIZATION
+    // ==========================================
+
+    c.getDateOnly = function(value) {
+
+        if (!value) {
+            return null;
+        }
+
+        if (value instanceof Date) {
+
+            if (isNaN(value.getTime())) {
+                return null;
+            }
+
+            return new Date(
+                value.getFullYear(),
+                value.getMonth(),
+                value.getDate()
+            );
+
+        }
+
+        var parts = String(value).split('-');
+
+        if (parts.length === 3) {
+
+            var year = Number(parts[0]);
+            var month = Number(parts[1]);
+            var day = Number(parts[2]);
+
+            var date = new Date(
+                year,
+                month - 1,
+                day
+            );
+
+            if (
+                isNaN(date.getTime()) ||
+                date.getFullYear() !== year ||
+                date.getMonth() !== month - 1 ||
+                date.getDate() !== day
+            ) {
+                return null;
+            }
+
+            return date;
+
+        }
+
+        return null;
+
+    };
+
+
+    c.formatDateForServer = function(value) {
+
+        var date = c.getDateOnly(value);
+
+        if (!date) {
+            return '';
+        }
+
+        var year = date.getFullYear();
+        var month = date.getMonth() + 1;
+        var day = date.getDate();
+
+        return year + '-' +
+            (month < 10 ? '0' : '') + month + '-' +
+            (day < 10 ? '0' : '') + day;
+
+    };
+
+
+    // ==========================================
+    // 5. DATE VALIDATION
+    // ==========================================
+
+    c.validateDates = function() {
+
+        c.dateError = '';
+
+        var start = c.getDateOnly(
+            c.leaveForm.startDate
+        );
+
+        var end = c.getDateOnly(
+            c.leaveForm.endDate
+        );
+
+        if (!start || !end) {
+
+            c.workingDays = 0;
+            return false;
+
+        }
+
+        if (end < start) {
+
+            c.dateError =
+                'End date cannot be earlier than start date.';
+
+            c.workingDays = 0;
+            return false;
+
+        }
+
+        var today = c.getDateOnly(new Date());
+
+        if (start < today) {
+
+            c.dateError =
+                'Start date cannot be in the past.';
+
+            c.workingDays = 0;
+            return false;
+
+        }
+
+        return true;
+
+    };
+
+
+    // ==========================================
+    // 6. WORKING DAY CALCULATION
+    // ==========================================
+
+    c.calculateWorkingDays = function() {
+
+        c.workingDays = 0;
+        c.dateError = '';
+
+        if (
+            !c.leaveForm.startDate ||
+            !c.leaveForm.endDate
+        ) {
+            return;
+        }
+
+        if (!c.validateDates()) {
+            return;
+        }
+
+        var start = c.getDateOnly(
+            c.leaveForm.startDate
+        );
+
+        var end = c.getDateOnly(
+            c.leaveForm.endDate
+        );
+
+        var current = new Date(start);
+        var total = 0;
+
+        while (current <= end) {
+
+            var day = current.getDay();
+
+            // Exclude Saturday and Sunday
+            if (day !== 0 && day !== 6) {
+                total++;
+            }
+
+            current.setDate(
+                current.getDate() + 1
+            );
+
+        }
+
+        c.workingDays = total;
+
+    };
+
+
+    // ==========================================
+    // 7. CLEAR LEAVE FORM
+    // ==========================================
+
+    c.clearForm = function() {
+
+        c.leaveForm = {
+            leaveType: '',
+            startDate: '',
+            endDate: '',
+            reason: ''
+        };
+
+        c.workingDays = 0;
+        c.dateError = '';
+        c.errorMessage = '';
+
+    };
+
+
+    // ==========================================
+    // 8. REFRESH DASHBOARD
+    // ==========================================
+
+    c.refreshDashboard = function() {
+
+        if (c.loading) {
+            return;
+        }
+
+        c.loading = true;
+
+        c.server.refresh().then(
+
+            function(response) {
+
+                c.loadDashboardData(response.data);
+
+                c.loading = false;
+                c.successMessage = '';
+                c.errorMessage = '';
+
+                c.calculateWorkingDays();
+
+            },
+
+            function() {
+
+                c.loading = false;
+
+                c.errorMessage =
+                    'Unable to refresh dashboard data. Please try again.';
+
+            }
+
+        );
+
+    };
+
+
+    // ==========================================
+    // 9. SUBMIT LEAVE REQUEST
+    // ==========================================
+
+    c.submitLeave = function() {
+
+        c.errorMessage = '';
+        c.successMessage = '';
+
+        if (c.submitting) {
+            return;
+        }
+
+        if (!c.employeeFound) {
+
+            c.errorMessage =
+                'Employee record not found.';
+
+            return;
+
+        }
+
+        if (!c.leaveForm.leaveType) {
+
+            c.errorMessage =
+                'Please select a leave type.';
+
+            return;
+
+        }
+
+        if (
+            !c.leaveForm.startDate ||
+            !c.leaveForm.endDate
+        ) {
+
+            c.errorMessage =
+                'Please select both leave dates.';
+
+            return;
+
+        }
+
+        if (!c.validateDates()) {
+
+            c.errorMessage = c.dateError;
+            return;
+
+        }
+
+        c.calculateWorkingDays();
+
+        if (c.workingDays <= 0) {
+
+            c.errorMessage =
+                'Please select at least one working day.';
+
+            return;
+
+        }
+
+        if (
+            !c.leaveForm.reason ||
+            !c.leaveForm.reason.trim()
+        ) {
+
+            c.errorMessage =
+                'Please enter the reason for leave.';
+
+            return;
+
+        }
+
+        c.submitting = true;
+
+        var payload = {
+
+            action: 'submit_leave',
+
+            leaveType: c.leaveForm.leaveType,
+
+            startDate: c.formatDateForServer(
+                c.leaveForm.startDate
+            ),
+
+            endDate: c.formatDateForServer(
+                c.leaveForm.endDate
+            ),
+
+            reason: c.leaveForm.reason.trim()
+
+        };
+
+
+        c.server.get(payload).then(
+
+            function(response) {
+
+                var result = response.data || {};
+
+                c.submitting = false;
+
+                if (result.submitSuccess === true) {
+
+                    c.requestNumber =
+                        result.requestNumber || '';
+
+                    c.successMessage =
+                        result.submitMessage ||
+                        'Leave request submitted successfully.';
+
+                    if (c.requestNumber) {
+
+                        c.successMessage +=
+                            ' Request Number: ' +
+                            c.requestNumber;
+
+                    }
+
+                    c.clearForm();
+
+                    c.loadDashboardData(result);
+
+                    c.activeTab = 'requests';
+
+                } else {
+
+                    c.errorMessage =
+                        result.submitMessage ||
+                        'Unable to submit leave request.';
+
+                }
+
+            },
+
+            function() {
+
+                c.submitting = false;
+
+                c.errorMessage =
+                    'Server communication failed. Please try again.';
+
+            }
+
+        );
+
+    };
+
+
+    // ==========================================
+    // 10. SEARCH MY REQUESTS
+    // ==========================================
+
+    c.filterRequests = function(request) {
+
+        if (!request) {
+            return false;
+        }
+
+        var search = String(
+            c.requestSearch || ''
+        ).toLowerCase().trim();
+
+        var selectedStatus = String(
+            c.statusFilter || ''
+        ).toLowerCase().trim();
+
+        var requestNumber = String(
+            request.number || ''
+        ).toLowerCase();
+
+        var leaveType = String(
+            request.leaveType || ''
+        ).toLowerCase();
+
+        var matchesSearch =
+            !search ||
+            requestNumber.indexOf(search) !== -1 ||
+            leaveType.indexOf(search) !== -1;
+
+        var requestStatus = String(
+            request.status || ''
+        ).toLowerCase().trim();
+
+        var matchesStatus =
+            !selectedStatus ||
+            requestStatus === selectedStatus;
+
+        return matchesSearch && matchesStatus;
+
+    };
+
+
+    // ==========================================
+    // 11. CLEAR REQUEST FILTERS
+    // ==========================================
+
+    c.clearRequestFilters = function() {
+
+        c.requestSearch = '';
+        c.statusFilter = '';
+
+    };
+
+
+    // ==========================================
+    // 12. SEARCH TEAM APPROVALS
+    // ==========================================
+
+    c.filterApprovals = function(approval) {
+
+        if (!approval) {
+            return false;
+        }
+
+        var search = String(
+            c.approvalSearch || ''
+        ).toLowerCase().trim();
+
+        if (!search) {
+            return true;
+        }
+
+        var employee = String(
+            approval.employee || ''
+        ).toLowerCase();
+
+        var requestNumber = String(
+            approval.number || ''
+        ).toLowerCase();
+
+        var leaveType = String(
+            approval.leaveType || ''
+        ).toLowerCase();
+
+        return (
+            employee.indexOf(search) !== -1 ||
+            requestNumber.indexOf(search) !== -1 ||
+            leaveType.indexOf(search) !== -1
+        );
+
+    };
+
+
+    // ==========================================
+    // 13. APPROVE LEAVE
+    // Uses Manager Comments textarea
+    // ==========================================
+
+    c.approveLeave = function(approval) {
+
+        c.errorMessage = '';
+
+        if (!approval || !approval.approvalId) {
+
+            c.errorMessage =
+                'Approval record not found.';
+
+            return;
+
+        }
+
+        if (c.processingApproval) {
+            return;
+        }
+
+        c.processApproval(
+            approval,
+            'approve_leave',
+            approval.comments || ''
+        );
+
+    };
+
+
+    // ==========================================
+    // 14. REJECT LEAVE
+    // Uses Manager Comments textarea
+    // ==========================================
+
+    c.rejectLeave = function(approval) {
+
+        c.errorMessage = '';
+
+        if (!approval || !approval.approvalId) {
+
+            c.errorMessage =
+                'Approval record not found.';
+
+            return;
+
+        }
+
+        if (c.processingApproval) {
+            return;
+        }
+
+        var comments = String(
+            approval.comments || ''
+        ).trim();
+
+        if (!comments) {
+
+            c.errorMessage =
+                'Please enter a rejection reason.';
+
+            return;
+
+        }
+
+        c.processApproval(
+            approval,
+            'reject_leave',
+            comments
+        );
+
+    };
+
+
+    // ==========================================
+    // 15. PROCESS APPROVAL ACTION
+    // ==========================================
+
+    c.processApproval = function(
+        approval,
+        action,
+        comments
+    ) {
+
+        c.errorMessage = '';
+        c.successMessage = '';
+
+        if (c.processingApproval) {
+            return;
+        }
+
+        c.processingApproval = true;
+        approval.processing = true;
+
+        var payload = {
+
+            action: action,
+
+            approvalId: approval.approvalId,
+
+            comments: comments || ''
+
+        };
+
+
+        c.server.get(payload).then(
+
+            function(response) {
+
+                var result = response.data || {};
+
+                c.processingApproval = false;
+                approval.processing = false;
+
+                if (result.actionSuccess === true) {
+
+                    c.successMessage =
+                        result.actionMessage ||
+                        'Approval action completed successfully.';
+
+                    // Reload data returned by Server Script
+                    c.loadDashboardData(result);
+
+                    c.approvalSearch = '';
+
+                    c.activeTab = 'approvals';
+
+                } else {
+
+                    c.errorMessage =
+                        result.actionMessage ||
+                        'Unable to process approval.';
+
+                }
+
+            },
+
+            function() {
+
+                c.processingApproval = false;
+                approval.processing = false;
+
+                c.errorMessage =
+                    'Server communication failed. Please try again.';
+
+            }
+
+        );
+
+    };
+
+
+    // ==========================================
+    // 16. CANCEL LEAVE PLACEHOLDER
+    // ==========================================
+
+    c.cancelLeave = function(request) {
+
+        alert(
+            'Leave cancellation will be implemented in a later phase.'
+        );
+
+    };
+
+}
+
+
+]]></client_script>
+        <controller_as>c</controller_as>
+        <css>
+/* =====================================================
+   LEAVE MANAGEMENT SYSTEM
+   COMPLETE CSS
+===================================================== */
+
+/* =====================================================
+   1. GLOBAL DASHBOARD
+===================================================== */
+
+.lm-dashboard,
+.lm-dashboard * {
+    box-sizing: border-box;
+}
+
+.lm-dashboard {
+    width: 100%;
+    min-height: 100vh;
+    padding: 0;
+    background: #f5f7fa;
+    color: #344054;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 13px;
+    overflow-x: hidden;
+}
+
+.lm-dashboard button,
+.lm-dashboard input,
+.lm-dashboard select,
+.lm-dashboard textarea {
+    font-family: inherit;
+}
+
+.lm-dashboard button {
+    cursor: pointer;
+}
+
+.lm-dashboard button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+/* =====================================================
+   2. HEADER
+===================================================== */
+
+.lm-header {
+    width: 100%;
+    padding: 24px 30px;
+    background: linear-gradient(115deg, #1765b5, #078d98);
+    border-radius: 12px;
+    color: #ffffff;
+    box-shadow: 0 5px 15px rgba(20, 85, 130, 0.15);
+}
+
+.lm-header-inner {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 20px;
+}
+
+.lm-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.lm-brand-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #ffffff;
+    font-size: 25px;
+}
+
+.lm-brand h2 {
+    margin: 0 0 5px;
+    color: #ffffff;
+    font-size: 27px;
+    font-weight: 700;
+}
+
+.lm-brand p {
+    margin: 0;
+    color: #e8f5ff;
+    font-size: 12px;
+}
+
+.lm-header-right {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+}
+
+.lm-welcome {
+    color: #ffffff;
+    font-size: 12px;
+}
+
+.lm-welcome strong {
+    font-weight: 700;
+}
+
+.lm-refresh-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    padding: 9px 16px;
+    min-height: 36px;
+    background: #ffffff;
+    color: #236caa;
+    border: none;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    transition: background 0.2s ease;
+}
+
+.lm-refresh-btn:hover {
+    background: #eaf5ff;
+}
+
+/* =====================================================
+   3. MAIN CONTENT
+===================================================== */
+
+.lm-main {
+    width: 100%;
+    padding: 20px 0 35px;
+}
+
+/* =====================================================
+   4. SUCCESS NOTIFICATION
+===================================================== */
+
+.lm-success-alert {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    width: 100%;
+    padding: 11px 14px;
+    margin-bottom: 17px;
+    background: #e9f7ed;
+    color: #267442;
+    border: 1px solid #c7e9d0;
+    border-radius: 5px;
+    font-size: 12px;
+}
+
+.lm-success-alert i {
+    margin-right: 5px;
+    color: #259650;
+    font-size: 16px;
+}
+
+.lm-success-alert button {
+    padding: 0 4px;
+    background: transparent;
+    color: #527a5c;
+    border: none;
+    font-size: 20px;
+}
+
+/* =====================================================
+   5. EMPLOYEE WARNING
+===================================================== */
+
+.lm-dashboard .alert {
+    margin-bottom: 17px;
+    padding: 12px 15px;
+    border-radius: 5px;
+    font-size: 12px;
+}
+
+/* =====================================================
+   6. LEAVE BALANCE PANEL
+===================================================== */
+
+.lm-balance-panel {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    width: 100%;
+    min-height: 82px;
+    padding: 17px 20px;
+    margin-bottom: 20px;
+    background: #ffffff;
+    border: 1px solid #edf0f4;
+    border-radius: 9px;
+    box-shadow: 0 2px 9px rgba(30, 50, 70, 0.04);
+}
+
+.lm-balance-heading {
+    display: block;
+    min-width: 205px;
+    color: #344c65;
+}
+
+.lm-balance-heading h3 {
+    margin: 0 0 5px;
+    color: #344c65;
+    font-size: 17px;
+    font-weight: 700;
+}
+
+.lm-balance-heading p {
+    margin: 0;
+    color: #8995a4;
+    font-size: 11px;
+}
+
+.lm-balance-items {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 20px;
+}
+
+.lm-balance-item {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 100px;
+    padding-left: 17px;
+    border-left: 1px solid #e9edf2;
+}
+
+.lm-balance-name {
+    color: #64748b;
+    font-size: 11px;
+}
+
+.lm-balance-number {
+    color: #1765b5;
+    font-size: 21px;
+    font-weight: 700;
+}
+
+.lm-balance-details,
+.lm-balance-used {
+    color: #8995a4;
+    font-size: 10px;
+}
+
+.lm-balance-empty {
+    color: #7c8795;
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+/* =====================================================
+   7. FOUR NAVIGATION TABS
+===================================================== */
+
+.lm-tabs {
+    display: flex;
+    align-items: stretch;
+    gap: 4px;
+    width: 100%;
+    margin-bottom: 0;
+    border-bottom: 1px solid #e8edf3;
+    overflow-x: auto;
+}
+
+.lm-tabs button {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    min-height: 43px;
+    padding: 11px 16px;
+    background: #edf1f5;
+    color: #66758a;
+    border: 1px solid #e2e7ed;
+    border-bottom: none;
+    border-radius: 8px 8px 0 0;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    transition: background 0.2s ease, color 0.2s ease;
+}
+
+.lm-tabs button:hover {
+    background: #e3edf7;
+    color: #1765b5;
+}
+
+.lm-tabs button.active {
+    background: #2476b6;
+    color: #ffffff;
+    border-color: #2476b6;
+}
+
+.lm-tabs button i {
+    font-size: 12px;
+}
+
+.lm-tab-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 17px;
+    height: 17px;
+    padding: 0 4px;
+    background: #df5757;
+    color: #ffffff;
+    border-radius: 50%;
+    font-size: 10px;
+}
+
+/* =====================================================
+   8. TAB CONTENT
+===================================================== */
+
+.lm-tab-content {
+    width: 100%;
+    padding: 23px 20px;
+    background: #ffffff;
+    border: 1px solid #e9edf2;
+    border-radius: 0 10px 10px 10px;
+    box-shadow: 0 3px 12px rgba(30, 50, 70, 0.04);
+}
+
+.lm-section-heading {
+    margin-bottom: 22px;
+}
+
+.lm-section-heading h3 {
+    margin: 0 0 5px;
+    color: #34465b;
+    font-size: 18px;
+    font-weight: 700;
+}
+
+.lm-section-heading p {
+    margin: 0;
+    color: #8995a4;
+    font-size: 11px;
+}
+
+/* =====================================================
+   9. APPLY LEAVE LAYOUT
+===================================================== */
+
+.lm-apply-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 180px;
+    align-items: start;
+    gap: 18px;
+    width: 100%;
+}
+
+.lm-form-card {
+    width: 100%;
+    min-width: 0;
+    padding: 18px;
+    background: #ffffff;
+    border: 1px solid #e8edf3;
+    border-radius: 8px;
+}
+
+.lm-form-card .form-group {
+    width: 100%;
+    margin-bottom: 15px;
+}
+
+.lm-form-card label {
+    display: block;
+    margin-bottom: 7px;
+    color: #46566b;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.lm-required {
+    color: #df5656;
+}
+
+.lm-form-card .form-control {
+    display: block;
+    width: 100%;
+    min-height: 39px;
+    padding: 9px 11px;
+    background: #ffffff;
+    color: #344054;
+    border: 1px solid #dce3eb;
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 12px;
+    outline: none;
+    box-shadow: none;
+}
+
+.lm-form-card .form-control:focus {
+    border-color: #3887c4;
+    box-shadow: 0 0 0 2px rgba(56, 135, 196, 0.10);
+}
+
+.lm-form-card .form-control::placeholder {
+    color: #a3adba;
+}
+
+.lm-form-card textarea.form-control {
+    min-height: 90px;
+    resize: vertical;
+}
+
+.lm-date-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+}
+
+.lm-help-text {
+    display: block;
+    margin-top: 5px;
+    color: #8995a4;
+    font-size: 10px;
+}
+
+/* =====================================================
+   10. DATE VALIDATION
+===================================================== */
+
+.lm-date-error {
+    margin: -5px 0 15px;
+    padding: 9px 12px;
+    color: #b83232;
+    background: #fff0f0;
+    border: 1px solid #f1caca;
+    border-radius: 5px;
+    font-size: 11px;
+}
+
+.lm-date-error i {
+    margin-right: 5px;
+}
+
+/* =====================================================
+   11. WORKING DAYS CARD
+===================================================== */
+
+.lm-days-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 180px;
+    margin-top: 65px;
+    padding: 14px 10px;
+    background: linear-gradient(140deg, #2479bb, #078f99);
+    color: #ffffff;
+    border-radius: 9px;
+    text-align: center;
+    box-shadow: 0 4px 12px rgba(15, 107, 155, 0.15);
+}
+
+.lm-days-icon {
+    color: #ffffff;
+    font-size: 17px;
+}
+
+.lm-days-card h4 {
+    margin: 8px 0 0;
+    color: #ffffff;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.lm-days-number {
+    margin: 8px 0 3px;
+    color: #ffffff;
+    font-size: 43px;
+    font-weight: 700;
+    line-height: 1.1;
+}
+
+.lm-days-card p {
+    margin: 0;
+    color: #e6f6ff;
+    font-size: 10px;
+}
+
+.lm-days-divider {
+    width: 85%;
+    height: 1px;
+    margin: 14px 0 10px;
+    background: rgba(255, 255, 255, 0.25);
+}
+
+.lm-days-card small {
+    color: #e6f6ff;
+    font-size: 10px;
+}
+/* =====================================================
+   12. FORM BUTTONS
+===================================================== */
+
+.lm-form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 18px;
+}
+
+.lm-form-actions button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    min-height: 37px;
+    padding: 9px 16px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    transition: background 0.2s ease;
+}
+
+.lm-clear-btn {
+    background: #ffffff;
+    color: #657386;
+    border: 1px solid #dce3eb;
+}
+
+.lm-clear-btn:hover {
+    background: #f2f5f8;
+}
+
+.lm-submit-btn {
+    background: #2678b9;
+    color: #ffffff;
+    border: 1px solid #2678b9;
+}
+
+.lm-submit-btn:hover {
+    background: #195f99;
+}
+
+/* =====================================================
+   13. CALENDAR
+===================================================== */
+
+.lm-calendar-card,
+.lm-calendar-requests {
+    width: 100%;
+    margin-bottom: 20px;
+    padding: 18px;
+    background: #ffffff;
+    border: 1px solid #e5ebf1;
+    border-radius: 8px;
+}
+
+.lm-calendar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    max-width: 480px;
+    margin: 0 auto 20px;
+}
+
+.lm-calendar-header h3 {
+    margin: 0;
+    color: #34465b;
+    font-size: 16px;
+    font-weight: 700;
+}
+
+.lm-calendar-nav {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 33px;
+    height: 33px;
+    background: #eef5fb;
+    color: #2678b9;
+    border: 1px solid #dfe9f2;
+    border-radius: 6px;
+}
+
+.lm-calendar-nav:hover {
+    background: #dcecf9;
+}
+
+.lm-calendar-legend {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 20px;
+    margin-bottom: 20px;
+    color: #68788b;
+    font-size: 11px;
+}
+
+.lm-calendar-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.lm-dot {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+}
+
+.lm-dot.approved {
+    background: #23a35b;
+}
+
+.lm-dot.pending {
+    background: #e4a22c;
+}
+
+.lm-dot.rejected {
+    background: #dc5656;
+}
+
+.lm-calendar-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 220px;
+    padding: 25px;
+    background: #f8fafc;
+    border: 1px dashed #dce4ed;
+    border-radius: 8px;
+    text-align: center;
+}
+
+.lm-calendar-placeholder i {
+    margin-bottom: 12px;
+    color: #6e9fc8;
+    font-size: 34px;
+}
+
+.lm-calendar-placeholder h4 {
+    margin: 0 0 7px;
+    color: #40536b;
+    font-size: 16px;
+}
+
+.lm-calendar-placeholder p {
+    margin: 0;
+    color: #8995a4;
+    font-size: 11px;
+    line-height: 1.6;
+}
+
+.lm-calendar-requests h4 {
+    margin: 0 0 15px;
+    color: #34465b;
+    font-size: 15px;
+    font-weight: 700;
+}
+
+/* =====================================================
+   14. TABLE CARD AND SEARCH
+===================================================== */
+
+.lm-table-card {
+    width: 100%;
+    padding: 17px;
+    background: #ffffff;
+    border: 1px solid #e5ebf1;
+    border-radius: 8px;
+}
+
+.lm-table-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 15px;
+    margin-bottom: 16px;
+}
+
+.lm-table-toolbar h4 {
+    margin: 0 0 5px;
+    color: #34465b;
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.lm-table-toolbar span {
+    color: #8995a4;
+    font-size: 10px;
+}
+
+.lm-search-box {
+    position: relative;
+    width: 240px;
+    max-width: 100%;
+}
+
+.lm-search-box i {
+    position: absolute;
+    top: 11px;
+    left: 12px;
+    color: #8995a4;
+}
+
+.lm-search-box input {
+    width: 100%;
+    min-height: 36px;
+    padding: 8px 12px 8px 32px;
+    background: #ffffff;
+    color: #344054;
+    border: 1px solid #dce3eb;
+    border-radius: 18px;
+    font-size: 11px;
+    outline: none;
+}
+
+.lm-search-box input:focus {
+    border-color: #3887c4;
+}
+
+/* =====================================================
+   15. REQUEST TABLE
+===================================================== */
+
+.lm-dashboard .table-responsive {
+    width: 100%;
+    overflow-x: auto;
+}
+
+.lm-table {
+    width: 100%;
+    min-width: 760px;
+    margin: 0;
+    border-collapse: collapse;
+    background: #ffffff;
+    font-size: 10px;
+}
+
+.lm-table thead th {
+    padding: 12px 9px;
+    background: #f4f7fa;
+    color: #66758a;
+    border-bottom: 1px solid #e4eaf0;
+    font-size: 9px;
+    font-weight: 700;
+    text-align: left;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.lm-table tbody td {
+    padding: 13px 9px;
+    color: #536277;
+    border-bottom: 1px solid #edf0f4;
+    vertical-align: middle;
+}
+
+.lm-table tbody tr:hover {
+    background: #f8fbfd;
+}
+
+.lm-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.lm-table td strong {
+    color: #246da8;
+    font-weight: 700;
+}
+
+.lm-empty {
+    padding: 30px 15px !important;
+    color: #8794a4 !important;
+    text-align: center !important;
+    font-size: 12px;
+}
+
+/* =====================================================
+   16. STATUS BADGES
+===================================================== */
+
+.lm-status {
+    display: inline-block;
+    padding: 4px 8px;
+    border-radius: 15px;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.lm-status.status-pending,
+.lm-status.status-submitted {
+    background: #fff2cf;
+    color: #a5750b;
+}
+
+.lm-status.status-approved {
+    background: #e4f5e9;
+    color: #25804a;
+}
+
+.lm-status.status-rejected {
+    background: #fde8e8;
+    color: #bc3c3c;
+}
+
+.lm-status.status-cancelled {
+    background: #edf0f4;
+    color: #697789;
+}
+
+/* =====================================================
+   17. CANCEL BUTTON
+===================================================== */
+
+.lm-cancel-btn {
+    padding: 5px 10px;
+    background: #d75a5a;
+    color: #ffffff;
+    border: none;
+    border-radius: 5px;
+    font-size: 9px;
+    font-weight: 600;
+}
+
+.lm-cancel-btn:hover {
+    background: #b94040;
+}
+
+/* =====================================================
+   18. TEAM APPROVALS
+===================================================== */
+
+.lm-approval-list {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.lm-approval-card {
+    width: 100%;
+    padding: 18px;
+    background: #ffffff;
+    border: 1px solid #e5ebf1;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(30, 50, 70, 0.04);
+}
+
+.lm-approval-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding-bottom: 12px;
+    margin-bottom: 13px;
+    border-bottom: 1px solid #edf0f4;
+}
+
+.lm-approval-top h4 {
+    margin: 0 0 4px;
+    color: #34465b;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.lm-approval-type {
+    color: #8995a4;
+    font-size: 10px;
+}
+
+.lm-approval-details {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px 15px;
+    margin-bottom: 15px;
+}
+
+.lm-approval-details label,
+.lm-approval-reason label,
+.lm-manager-comment label {
+    display: block;
+    margin-bottom: 5px;
+    color: #46566b;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.lm-approval-details p {
+    margin: 0;
+    color: #68788b;
+    font-size: 11px;
+    overflow-wrap: anywhere;
+}
+
+.lm-approval-reason {
+    margin-bottom: 15px;
+}
+
+.lm-approval-reason p {
+    margin: 0;
+    color: #68788b;
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.lm-manager-comment {
+    margin-bottom: 15px;
+}
+
+.lm-manager-comment textarea {
+    width: 100%;
+    min-height: 55px;
+    padding: 9px 11px;
+    background: #ffffff;
+    border: 1px solid #dce3eb;
+    border-radius: 6px;
+    font-size: 11px;
+    resize: vertical;
+}
+
+.lm-manager-comment textarea:focus {
+    border-color: #3887c4;
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(56, 135, 196, 0.10);
+}
+
+.lm-approval-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+.lm-approve-btn,
+.lm-reject-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    min-height: 35px;
+    padding: 8px 15px;
+    border-radius: 5px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.lm-approve-btn {
+    background: #20995a;
+    color: #ffffff;
+    border: 1px solid #20995a;
+}
+
+.lm-approve-btn:hover {
+    background: #167b46;
+}
+
+.lm-reject-btn {
+    background: #ffffff;
+    color: #cf4b4b;
+    border: 1px solid #e5bcbc;
+}
+
+.lm-reject-btn:hover {
+    background: #fff0f0;
+}
+
+.lm-empty-approvals {
+    padding: 35px 15px;
+    color: #8995a4;
+    text-align: center;
+}
+
+.lm-empty-approvals i {
+    color: #23a35b;
+    font-size: 30px;
+}
+
+.lm-empty-approvals h4 {
+    color: #40536b;
+    font-size: 15px;
+}
+
+.lm-empty-approvals p {
+    font-size: 11px;
+}
+
+/* =====================================================
+   19. FOOTER
+===================================================== */
+
+.lm-footer {
+    width: 100%;
+    padding: 17px 0 0;
+    text-align: center;
+}
+
+.lm-footer p {
+    margin: 0;
+    color: #8995a4;
+    font-size: 10px;
+}
+
+.lm-footer span {
+    margin: 0 5px;
+}
+
+/* =====================================================
+   20. ACCESSIBILITY AND FOCUS
+===================================================== */
+
+.lm-dashboard button:focus-visible,
+.lm-dashboard input:focus-visible,
+.lm-dashboard select:focus-visible,
+.lm-dashboard textarea:focus-visible {
+    outline: 2px solid #3486c1;
+    outline-offset: 2px;
+}
+/* =====================================================
+   21. TABLET RESPONSIVE
+===================================================== */
+
+@media (max-width: 900px) {
+
+    .lm-apply-layout {
+        grid-template-columns: minmax(0, 1fr) 155px;
+        gap: 13px;
+    }
+
+    .lm-tab-content {
+        padding: 19px 15px;
+    }
+
+    .lm-tabs button {
+        padding: 10px 11px;
+    }
+
+    .lm-balance-panel {
+        gap: 12px;
+    }
+
+}
+
+/* =====================================================
+   22. MOBILE RESPONSIVE
+===================================================== */
+
+@media (max-width: 650px) {
+
+    .lm-header {
+        padding: 20px 17px;
+    }
+
+    .lm-brand h2 {
+        font-size: 22px;
+    }
+
+    .lm-header-inner {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .lm-header-right {
+        width: 100%;
+        justify-content: space-between;
+        flex-wrap: wrap;
+    }
+
+    .lm-refresh-btn {
+        padding: 8px 11px;
+        font-size: 10px;
+    }
+
+    .lm-main {
+        padding-top: 15px;
+    }
+
+    .lm-balance-panel {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 10px;
+        padding: 14px;
+    }
+
+    .lm-balance-heading {
+        min-width: 0;
+    }
+
+    .lm-balance-items {
+        gap: 12px;
+    }
+
+    .lm-balance-item {
+        padding-left: 10px;
+    }
+
+    .lm-tabs {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 4px;
+    }
+
+    .lm-tabs button {
+        min-height: 42px;
+        padding: 9px 5px;
+        border: 1px solid #e2e7ed;
+        border-radius: 6px;
+        font-size: 10px;
+    }
+
+    .lm-tab-content {
+        padding: 17px 12px;
+        border-radius: 8px;
+    }
+
+    .lm-apply-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .lm-form-card {
+        padding: 13px;
+    }
+
+    .lm-days-card {
+        min-height: 125px;
+        margin-top: 0;
+    }
+
+    .lm-days-number {
+        font-size: 35px;
+    }
+
+    .lm-date-row {
+        grid-template-columns: 1fr;
+        gap: 0;
+    }
+
+    .lm-form-actions {
+        justify-content: stretch;
+    }
+
+    .lm-form-actions button {
+        flex: 1;
+    }
+
+    .lm-table-toolbar {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .lm-search-box {
+        width: 100%;
+    }
+
+    .lm-approval-details {
+        grid-template-columns: 1fr;
+    }
+
+    .lm-approval-actions {
+        flex-direction: column;
+    }
+
+    .lm-approve-btn,
+    .lm-reject-btn {
+        width: 100%;
+    }
+
+}
+
+/* =====================================================
+   23. SMALL MOBILE
+===================================================== */
+
+@media (max-width: 380px) {
+
+    .lm-brand h2 {
+        font-size: 19px;
+    }
+
+    .lm-brand p {
+        font-size: 10px;
+    }
+
+    .lm-tabs button {
+        gap: 4px;
+        font-size: 9px;
+    }
+
+    .lm-form-actions {
+        flex-direction: column;
+    }
+
+    .lm-form-actions button {
+        width: 100%;
+    }
+
+    .lm-approval-actions {
+        flex-direction: column;
+    }
+
+    .lm-approve-btn,
+    .lm-reject-btn {
+        width: 100%;
+    }
+
+}
+
+/* =====================================================
+   24. MY REQUESTS - SEARCH AND STATUS FILTERS
+===================================================== */
+
+.lm-request-filters {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    width: 100%;
+    margin-bottom: 16px;
+}
+
+.lm-status-filter {
+    min-height: 36px;
+    padding: 8px 12px;
+    background: #ffffff;
+    color: #344054;
+    border: 1px solid #dce3eb;
+    border-radius: 18px;
+    font-family: inherit;
+    font-size: 11px;
+    outline: none;
+    cursor: pointer;
+}
+
+.lm-status-filter:focus {
+    border-color: #3887c4;
+    box-shadow: 0 0 0 2px rgba(56, 135, 196, 0.10);
+}
+
+@media (max-width: 650px) {
+
+    .lm-request-filters {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 9px;
+    }
+
+    .lm-request-filters .lm-search-box {
+        width: 100%;
+    }
+
+    .lm-status-filter {
+        width: 100%;
+    }
+
+}</css>
+        <data_table>sp_instance</data_table>
+        <demo_data/>
+        <description/>
+        <docs/>
+        <field_list/>
+        <has_preview>false</has_preview>
+        <id>leave_management_dashboard</id>
+        <internal>false</internal>
+        <link><![CDATA[function link(scope, element, attrs, controller) {  }]]></link>
+        <name>Leave Management Dashboard</name>
+        <option_schema/>
+        <public>false</public>
+        <roles/>
+        <script><![CDATA[
+(function () {
+
+    // ==============================================
+    // 1. INITIALIZE DASHBOARD DATA
+    // ==============================================
+
+    data.userName = gs.getUserDisplayName();
+    data.employeeFound = false;
+    data.employeeId = '';
+
+    data.leaveTypes = [];
+    data.leaveBalances = [];
+    data.myRequests = [];
+    data.teamApprovals = [];
+
+    data.submitSuccess = false;
+    data.submitMessage = '';
+    data.requestNumber = '';
+
+    data.actionSuccess = false;
+    data.actionMessage = '';
+
+    var currentUserId = gs.getUserID();
+    var currentYear = new GlideDate().getValue().substring(0, 4);
+
+    // IMPORTANT:
+    // These must match the actual choice values in ServiceNow.
+
+    var STATUS_PENDING = 'pending';
+    var STATUS_APPROVED = 'approved';
+    var STATUS_REJECTED = 'rejected';
+
+    // Table names
+
+    var EMPLOYEE_TABLE = 'x_2132473_leave_0_employee';
+    var TYPE_TABLE = 'x_2132473_leave_0_leave_type';
+    var BALANCE_TABLE = 'x_2132473_leave_0_leave_balance';
+    var REQUEST_TABLE = 'x_2132473_leave_0_leave_request';
+    var APPROVAL_TABLE = 'x_2132473_leave_0_leave_approval';
+
+
+    // ==============================================
+    // 2. HELPER FUNCTIONS
+    // ==============================================
+
+    function getLeaveTypeName(leaveTypeId) {
+
+        if (!leaveTypeId) {
+            return '';
+        }
+
+        var gr = new GlideRecord(TYPE_TABLE);
+
+        if (gr.get(leaveTypeId)) {
+            return gr.getValue('leave_name') || '';
+        }
+
+        return '';
+    }
+
+
+    function isValidDate(dateString) {
+
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+            return false;
+        }
+
+        var parts = dateString.split('-');
+
+        var year = parseInt(parts[0], 10);
+        var month = parseInt(parts[1], 10);
+        var day = parseInt(parts[2], 10);
+
+        var date = new Date(Date.UTC(
+            year,
+            month - 1,
+            day
+        ));
+
+        return (
+            date.getUTCFullYear() === year &&
+            date.getUTCMonth() === month - 1 &&
+            date.getUTCDate() === day
+        );
+    }
+
+
+    function calculateWorkingDays(startDate, endDate) {
+
+        var startParts = startDate.split('-');
+        var endParts = endDate.split('-');
+
+        var current = Date.UTC(
+            parseInt(startParts[0], 10),
+            parseInt(startParts[1], 10) - 1,
+            parseInt(startParts[2], 10)
+        );
+
+        var end = Date.UTC(
+            parseInt(endParts[0], 10),
+            parseInt(endParts[1], 10) - 1,
+            parseInt(endParts[2], 10)
+        );
+
+        var count = 0;
+
+        while (current <= end) {
+
+            var day = new Date(current).getUTCDay();
+
+            // Exclude Saturday and Sunday
+            if (day !== 0 && day !== 6) {
+                count++;
+            }
+
+            current += 86400000;
+        }
+
+        return count;
+    }
+
+
+    function getEmployeeForCurrentUser() {
+
+        var gr = new GlideRecord(EMPLOYEE_TABLE);
+
+        gr.addQuery('user', currentUserId);
+        gr.addQuery('active', true);
+        gr.setLimit(1);
+        gr.query();
+
+        if (gr.next()) {
+            return gr;
+        }
+
+        return null;
+    }
+
+
+    // ==============================================
+    // 3. FIND CURRENT EMPLOYEE
+    // ==============================================
+
+    var employeeGR = getEmployeeForCurrentUser();
+
+    if (employeeGR) {
+
+        data.employeeFound = true;
+        data.employeeId = employeeGR.getUniqueValue();
+
+    }
+
+
+    // ==============================================
+    // 4. SUBMIT LEAVE REQUEST
+    // ==============================================
+
+    if (input && input.action === 'submit_leave') {
+
+        var insertedRequestId = '';
+        var insertedApprovalId = '';
+
+        try {
+
+            if (!employeeGR) {
+                throw 'Employee record not found.';
+            }
+
+            var managerId = employeeGR.getValue('manager');
+
+            if (!managerId) {
+                throw 'No manager is assigned to this employee.';
+            }
+
+            var managerGR = new GlideRecord(EMPLOYEE_TABLE);
+
+            if (
+                !managerGR.get(managerId) ||
+                managerGR.getValue('active') !== '1'
+            ) {
+                throw 'Assigned manager is inactive or invalid.';
+            }
+
+            var leaveTypeId = String(input.leaveType || '');
+            var startDate = String(input.startDate || '');
+            var endDate = String(input.endDate || '');
+            var reason = String(input.reason || '').trim();
+
+            if (
+                !leaveTypeId ||
+                !startDate ||
+                !endDate ||
+                !reason
+            ) {
+                throw 'Please complete all required fields.';
+            }
+
+            if (reason.length > 1000) {
+                throw 'Reason cannot exceed 1000 characters.';
+            }
+
+            if (
+                !isValidDate(startDate) ||
+                !isValidDate(endDate)
+            ) {
+                throw 'Please enter valid dates.';
+            }
+
+            var today = new GlideDate().getValue();
+
+            if (startDate < today) {
+                throw 'Start date cannot be in the past.';
+            }
+
+            if (endDate < startDate) {
+                throw 'End date cannot be earlier than start date.';
+            }
+
+            // Validate active Leave Type
+
+            var leaveTypeGR = new GlideRecord(TYPE_TABLE);
+
+            leaveTypeGR.addQuery('sys_id', leaveTypeId);
+            leaveTypeGR.addQuery('active', true);
+            leaveTypeGR.setLimit(1);
+            leaveTypeGR.query();
+
+            if (!leaveTypeGR.next()) {
+                throw 'Selected leave type is inactive or invalid.';
+            }
+
+            var workingDays = calculateWorkingDays(
+                startDate,
+                endDate
+            );
+
+            if (workingDays <= 0) {
+                throw 'Selected dates contain no working days.';
+            }
+
+
+            // ==========================================
+            // 4.1 CREATE LEAVE REQUEST
+            // ==========================================
+
+            var requestGR = new GlideRecord(REQUEST_TABLE);
+
+            requestGR.initialize();
+
+            var requestFields = [
+                'employee',
+                'leave_type',
+                'start_date',
+                'end_date',
+                'number_of_days',
+                'reason',
+                'status'
+            ];
+
+            for (var i = 0; i < requestFields.length; i++) {
+
+                if (!requestGR.isValidField(requestFields[i])) {
+                    throw 'Missing Leave Request field: ' +
+                        requestFields[i];
+                }
+            }
+
+            requestGR.setValue(
+                'employee',
+                employeeGR.getUniqueValue()
+            );
+
+            requestGR.setValue('leave_type', leaveTypeId);
+            requestGR.setValue('start_date', startDate);
+            requestGR.setValue('end_date', endDate);
+            requestGR.setValue('number_of_days', workingDays);
+            requestGR.setValue('reason', reason);
+            requestGR.setValue('status', STATUS_PENDING);
+
+            if (requestGR.isValidField('manager_comments')) {
+                requestGR.setValue('manager_comments', '');
+            }
+
+            insertedRequestId = requestGR.insert();
+
+            if (!insertedRequestId) {
+                throw 'Unable to create leave request.';
+            }
+
+
+            // ==========================================
+            // 4.2 CREATE MANAGER APPROVAL
+            // ==========================================
+
+            var approvalGR = new GlideRecord(APPROVAL_TABLE);
+
+            approvalGR.initialize();
+
+            var approvalFields = [
+                'leave_request',
+                'approver',
+                'approval_status',
+                'active'
+            ];
+
+            for (var j = 0; j < approvalFields.length; j++) {
+
+                if (!approvalGR.isValidField(approvalFields[j])) {
+                    throw 'Missing Leave Approval field: ' +
+                        approvalFields[j];
+                }
+            }
+
+            approvalGR.setValue(
+                'leave_request',
+                insertedRequestId
+            );
+
+            approvalGR.setValue(
+                'approver',
+                managerId
+            );
+
+            approvalGR.setValue(
+                'approval_status',
+                STATUS_PENDING
+            );
+
+            approvalGR.setValue('active', true);
+
+            insertedApprovalId = approvalGR.insert();
+
+            if (!insertedApprovalId) {
+                throw 'Unable to create manager approval record.';
+            }
+
+
+            // Submission successful
+
+            var savedRequest = new GlideRecord(REQUEST_TABLE);
+
+            if (savedRequest.get(insertedRequestId)) {
+
+                data.requestNumber =
+                    savedRequest.getDisplayValue('number');
+
+            }
+
+            data.submitSuccess = true;
+
+            data.submitMessage =
+                'Leave request submitted successfully and sent to your manager.';
+
+        } catch (error) {
+
+            // Clean up partially created records.
+
+            if (insertedApprovalId) {
+
+                var removeApproval = new GlideRecord(APPROVAL_TABLE);
+
+                if (removeApproval.get(insertedApprovalId)) {
+                    removeApproval.deleteRecord();
+                }
+
+            }
+
+            if (insertedRequestId) {
+
+                var removeRequest = new GlideRecord(REQUEST_TABLE);
+
+                if (removeRequest.get(insertedRequestId)) {
+                    removeRequest.deleteRecord();
+                }
+
+            }
+
+            data.submitSuccess = false;
+            data.submitMessage = String(error);
+
+            gs.error(
+                'Leave submission error: ' + String(error)
+            );
+
+        }
+    }
+
+
+    // ==============================================
+    // 5. APPROVE / REJECT WITH BALANCE MANAGEMENT
+    // ==============================================
+
+    if (
+        input &&
+        (
+            input.action === 'approve_leave' ||
+            input.action === 'reject_leave'
+        )
+    ) {
+
+        var balanceUpdated = false;
+        var approvalUpdated = false;
+        var requestUpdated = false;
+
+        var balanceRecordId = '';
+
+        var oldUsedDays = 0;
+        var oldAvailableDays = 0;
+
+        var approvalRecord = null;
+        var linkedRequestGR = null;
+
+        var requestedDays = 0;
+
+        try {
+
+            if (!employeeGR) {
+                throw 'Active Employee record not found.';
+            }
+
+            var approvalId = String(input.approvalId || '');
+            var comments = String(input.comments || '').trim();
+
+            if (!approvalId) {
+                throw 'Approval record ID is required.';
+            }
+
+            if (comments.length > 1000) {
+                throw 'Comments cannot exceed 1000 characters.';
+            }
+
+            if (
+                input.action === 'reject_leave' &&
+                !comments
+            ) {
+                throw 'Please enter a rejection reason.';
+            }
+
+
+            // ==========================================
+            // 5.1 FIND APPROVAL RECORD
+            // ==========================================
+
+            approvalRecord = new GlideRecord(APPROVAL_TABLE);
+
+            if (!approvalRecord.get(approvalId)) {
+                throw 'Approval record not found.';
+            }
+
+
+            // ==========================================
+            // 5.2 VERIFY MANAGER AUTHORIZATION
+            // ==========================================
+
+            if (
+                approvalRecord.getValue('approver') !==
+                employeeGR.getUniqueValue()
+            ) {
+                throw 'You are not authorized to process this request.';
+            }
+
+            if (approvalRecord.getValue('active') !== '1') {
+                throw 'This approval is no longer active.';
+            }
+
+            if (
+                approvalRecord.getValue('approval_status') !==
+                STATUS_PENDING
+            ) {
+                throw 'This request has already been processed.';
+            }
+
+
+            // ==========================================
+            // 5.3 FIND LINKED LEAVE REQUEST
+            // ==========================================
+
+            var linkedRequestId =
+                approvalRecord.getValue('leave_request');
+
+            if (!linkedRequestId) {
+                throw 'Linked leave request not found.';
+            }
+
+            linkedRequestGR = new GlideRecord(REQUEST_TABLE);
+
+            if (!linkedRequestGR.get(linkedRequestId)) {
+                throw 'Leave request not found.';
+            }
+
+            if (
+                linkedRequestGR.getValue('status') !==
+                STATUS_PENDING
+            ) {
+                throw 'Leave request is no longer pending.';
+            }
+
+
+            // ==========================================
+            // 5.4 DETERMINE DECISION
+            // ==========================================
+
+            var decisionStatus =
+                input.action === 'approve_leave' ?
+                STATUS_APPROVED :
+                STATUS_REJECTED;
+
+
+            // ==========================================
+            // 5.5 CHECK BALANCE BEFORE APPROVAL
+            // ==========================================
+
+            if (decisionStatus === STATUS_APPROVED) {
+
+                var requestEmployee =
+                    linkedRequestGR.getValue('employee');
+
+                var requestLeaveType =
+                    linkedRequestGR.getValue('leave_type');
+
+                var requestStartDate =
+                    linkedRequestGR.getValue('start_date');
+
+                requestedDays = parseFloat(
+                    linkedRequestGR.getValue('number_of_days') || 0
+                );
+
+                if (
+                    !requestEmployee ||
+                    !requestLeaveType ||
+                    !requestStartDate ||
+                    requestedDays <= 0
+                ) {
+                    throw 'Invalid leave request details.';
+                }
+
+                // Get leave year from request start date.
+
+                var requestYear =
+                    requestStartDate.substring(0, 4);
+
+                var yearStart = requestYear + '-01-01';
+                var yearEnd = requestYear + '-12-31';
+
+
+                // Find matching employee/type/year balance.
+
+                var balanceGR = new GlideRecord(BALANCE_TABLE);
+
+                balanceGR.addQuery(
+                    'employee',
+                    requestEmployee
+                );
+
+                balanceGR.addQuery(
+                    'leave_type',
+                    requestLeaveType
+                );
+
+                balanceGR.addQuery(
+                    'year',
+                    '>=',
+                    yearStart
+                );
+
+                balanceGR.addQuery(
+                    'year',
+                    '<=',
+                    yearEnd
+                );
+
+                balanceGR.setLimit(2);
+                balanceGR.query();
+
+                if (!balanceGR.next()) {
+                    throw 'Leave balance record not found for this employee, leave type and year.';
+                }
+
+                balanceRecordId = balanceGR.getUniqueValue();
+
+                if (balanceGR.next()) {
+                    throw 'Duplicate leave balance records found. Please contact the administrator.';
+                }
+
+                // Reload unique balance record.
+
+                balanceGR = new GlideRecord(BALANCE_TABLE);
+
+                if (!balanceGR.get(balanceRecordId)) {
+                    throw 'Unable to retrieve leave balance record.';
+                }
+
+                oldUsedDays = parseFloat(
+                    balanceGR.getValue('used_days') || 0
+                );
+
+                oldAvailableDays = parseFloat(
+                    balanceGR.getValue('available_days') || 0
+                );
+
+                if (oldAvailableDays < requestedDays) {
+
+                    throw 'Insufficient leave balance. Available: ' +
+                        oldAvailableDays +
+                        ' days. Requested: ' +
+                        requestedDays +
+                        ' days.';
+
+                }
+
+
+                // ==========================================
+                // 5.6 DEDUCT LEAVE BALANCE
+                // ==========================================
+
+                var newUsedDays =
+                    oldUsedDays + requestedDays;
+
+                var newAvailableDays =
+                    oldAvailableDays - requestedDays;
+
+                balanceGR.setValue(
+                    'used_days',
+                    newUsedDays
+                );
+
+                balanceGR.setValue(
+                    'available_days',
+                    newAvailableDays
+                );
+
+                var balanceResult = balanceGR.update();
+
+                if (!balanceResult) {
+                    throw 'Unable to update employee leave balance.';
+                }
+
+                balanceUpdated = true;
+
+            }
+
+
+            // ==========================================
+            // 5.7 UPDATE APPROVAL RECORD
+            // ==========================================
+
+            approvalRecord.setValue(
+                'approval_status',
+                decisionStatus
+            );
+
+            // Assumes decision_date is Date/Time.
+
+            approvalRecord.setValue(
+                'decision_date',
+                new GlideDateTime().getValue()
+            );
+
+            approvalRecord.setValue(
+                'comments',
+                comments
+            );
+
+            approvalRecord.setValue(
+                'active',
+                false
+            );
+
+            var approvalResult = approvalRecord.update();
+
+            if (!approvalResult) {
+                throw 'Unable to update approval record.';
+            }
+
+            approvalUpdated = true;
+
+
+            // ==========================================
+            // 5.8 UPDATE LEAVE REQUEST
+            // ==========================================
+
+            linkedRequestGR.setValue(
+                'status',
+                decisionStatus
+            );
+
+            if (
+                linkedRequestGR.isValidField('manager_comments')
+            ) {
+
+                linkedRequestGR.setValue(
+                    'manager_comments',
+                    comments
+                );
+
+            }
+
+            var requestResult = linkedRequestGR.update();
+
+            if (!requestResult) {
+                throw 'Unable to update leave request status.';
+            }
+
+            requestUpdated = true;
+
+
+            // ==========================================
+            // 5.9 SUCCESS RESPONSE
+            // ==========================================
+
+            data.actionSuccess = true;
+
+            if (decisionStatus === STATUS_APPROVED) {
+
+                data.actionMessage =
+                    'Leave request approved successfully. ' +
+                    requestedDays +
+                    ' leave days deducted from employee balance.';
+
+            } else {
+
+                data.actionMessage =
+                    'Leave request rejected successfully. No leave balance deducted.';
+
+            }
+
+        } catch (error) {
+
+            // ==========================================
+            // 5.10 COMPENSATING ROLLBACK
+            // ==========================================
+
+            // Restore balance only if this action updated it.
+
+            if (balanceUpdated && balanceRecordId) {
+
+                var rollbackBalance = new GlideRecord(BALANCE_TABLE);
+
+                if (rollbackBalance.get(balanceRecordId)) {
+
+                    rollbackBalance.setValue(
+                        'used_days',
+                        oldUsedDays
+                    );
+
+                    rollbackBalance.setValue(
+                        'available_days',
+                        oldAvailableDays
+                    );
+
+                    rollbackBalance.update();
+
+                }
+
+            }
+
+
+            // Restore approval only if this action updated it.
+
+            if (approvalUpdated && approvalRecord) {
+
+                var rollbackApproval =
+                    new GlideRecord(APPROVAL_TABLE);
+
+                if (rollbackApproval.get(approvalRecord.getUniqueValue())) {
+
+                    rollbackApproval.setValue(
+                        'approval_status',
+                        STATUS_PENDING
+                    );
+
+                    rollbackApproval.setValue('active', true);
+                    rollbackApproval.setValue('comments', '');
+                    rollbackApproval.setValue('decision_date', '');
+
+                    rollbackApproval.update();
+
+                }
+
+            }
+
+
+            // Restore request only if this action updated it.
+
+            if (requestUpdated && linkedRequestGR) {
+
+                var rollbackRequest =
+                    new GlideRecord(REQUEST_TABLE);
+
+                if (rollbackRequest.get(linkedRequestGR.getUniqueValue())) {
+
+                    rollbackRequest.setValue(
+                        'status',
+                        STATUS_PENDING
+                    );
+
+                    rollbackRequest.setValue(
+                        'manager_comments',
+                        ''
+                    );
+
+                    rollbackRequest.update();
+
+                }
+
+            }
+
+            data.actionSuccess = false;
+            data.actionMessage = String(error);
+
+            gs.error(
+                'Leave approval/balance error: ' +
+                String(error)
+            );
+
+        }
+    }
+
+
+    // ==============================================
+    // 6. LOAD ACTIVE LEAVE TYPES
+    // ==============================================
+
+    var typeGR = new GlideRecord(TYPE_TABLE);
+
+    typeGR.addQuery('active', true);
+    typeGR.orderBy('leave_name');
+    typeGR.query();
+
+    while (typeGR.next()) {
+
+        data.leaveTypes.push({
+
+            sysId: typeGR.getUniqueValue(),
+
+            name: typeGR.getValue('leave_name'),
+
+            code: typeGR.getValue('leave_code'),
+
+            entitlement: typeGR.getValue('annual_entitlement')
+
+        });
+
+    }
+
+
+    // ==============================================
+    // 7. LOAD EMPLOYEE LEAVE BALANCES
+    // ==============================================
+
+    if (employeeGR) {
+
+        var balanceListGR = new GlideRecord(BALANCE_TABLE);
+
+        balanceListGR.addQuery(
+            'employee',
+            employeeGR.getUniqueValue()
+        );
+
+        balanceListGR.query();
+
+        while (balanceListGR.next()) {
+
+            var balanceDate = balanceListGR.getValue('year');
+
+            if (
+                !balanceDate ||
+                balanceDate.substring(0, 4) !== currentYear
+            ) {
+                continue;
+            }
+
+            data.leaveBalances.push({
+
+                sysId: balanceListGR.getUniqueValue(),
+
+                leaveType: getLeaveTypeName(
+                    balanceListGR.getValue('leave_type')
+                ),
+
+                totalEntitlement: parseFloat(
+                    balanceListGR.getValue('total_entitlement') || 0
+                ),
+
+                usedDays: parseFloat(
+                    balanceListGR.getValue('used_days') || 0
+                ),
+
+                availableDays: parseFloat(
+                    balanceListGR.getValue('available_days') || 0
+                )
+
+            });
+
+        }
+
+    }
+
+
+    // ==============================================
+    // 8. LOAD MY LEAVE REQUESTS
+    // ==============================================
+
+    if (employeeGR) {
+
+        var myRequestGR = new GlideRecord(REQUEST_TABLE);
+
+        myRequestGR.addQuery(
+            'employee',
+            employeeGR.getUniqueValue()
+        );
+
+        myRequestGR.orderByDesc('sys_created_on');
+        myRequestGR.query();
+
+        while (myRequestGR.next()) {
+
+            var requestStatus =
+                myRequestGR.getValue('status') || '';
+
+            var normalizedStatus = requestStatus
+                .toLowerCase()
+                .replace(/\s+/g, '_');
+
+            var requestDays = myRequestGR.getValue(
+                'number_of_days'
+            );
+
+            data.myRequests.push({
+
+                sysId: myRequestGR.getUniqueValue(),
+
+                number: myRequestGR.getDisplayValue('number'),
+
+                leaveType: getLeaveTypeName(
+                    myRequestGR.getValue('leave_type')
+                ),
+
+                startDate: myRequestGR.getDisplayValue('start_date'),
+
+                endDate: myRequestGR.getDisplayValue('end_date'),
+
+                numberOfDays: requestDays,
+
+                days: requestDays,
+
+                status: myRequestGR.getDisplayValue('status'),
+
+                statusClass: 'lm-status-' + normalizedStatus,
+
+                comments: myRequestGR.isValidField('manager_comments') ?
+                    myRequestGR.getValue('manager_comments') : '',
+
+                canCancel: requestStatus === STATUS_PENDING
+
+            });
+
+        }
+
+    }
+
+
+    // ==============================================
+    // 9. LOAD TEAM APPROVALS
+    // ==============================================
+
+    if (employeeGR) {
+
+        var approvalListGR = new GlideRecord(APPROVAL_TABLE);
+
+        approvalListGR.addQuery(
+            'approver',
+            employeeGR.getUniqueValue()
+        );
+
+        approvalListGR.addQuery(
+            'approval_status',
+            STATUS_PENDING
+        );
+
+        approvalListGR.addQuery('active', true);
+
+        approvalListGR.orderByDesc('sys_created_on');
+        approvalListGR.query();
+
+        while (approvalListGR.next()) {
+
+            var requestId =
+                approvalListGR.getValue('leave_request');
+
+            if (!requestId) {
+                continue;
+            }
+
+            var teamRequestGR = new GlideRecord(REQUEST_TABLE);
+
+            if (!teamRequestGR.get(requestId)) {
+                continue;
+            }
+
+            if (
+                teamRequestGR.getValue('status') !==
+                STATUS_PENDING
+            ) {
+                continue;
+            }
+
+            var teamDays = teamRequestGR.getValue(
+                'number_of_days'
+            );
+
+            data.teamApprovals.push({
+
+                sysId: approvalListGR.getUniqueValue(),
+
+                approvalId: approvalListGR.getUniqueValue(),
+
+                requestSysId: teamRequestGR.getUniqueValue(),
+
+                number: teamRequestGR.getDisplayValue('number'),
+
+                employee: teamRequestGR.getDisplayValue('employee'),
+
+                leaveType: getLeaveTypeName(
+                    teamRequestGR.getValue('leave_type')
+                ),
+
+                startDate: teamRequestGR.getDisplayValue('start_date'),
+
+                endDate: teamRequestGR.getDisplayValue('end_date'),
+
+                numberOfDays: teamDays,
+
+                days: teamDays,
+
+                reason: teamRequestGR.getValue('reason'),
+
+                comments: approvalListGR.getValue('comments') || '',
+
+                status: approvalListGR.getDisplayValue('approval_status')
+
+            });
+
+        }
+
+    }
+
+})();
+]]></script>
+        <servicenow>false</servicenow>
+        <sys_class_name>sp_widget</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2026-11-01 10:34:26</sys_created_on>
+        <sys_id>694377998318d390ecf6f0d6feaad39a</sys_id>
+        <sys_mod_count>34</sys_mod_count>
+        <sys_name>Leave Management Dashboard</sys_name>
+        <sys_package display_value="Leave Management System" source="x_2132473_leave_0">fe945245835c1390ecf6f0d6feaad3ad</sys_package>
+        <sys_policy/>
+        <sys_scope display_value="Leave Management System">fe945245835c1390ecf6f0d6feaad3ad</sys_scope>
+        <sys_update_name>sp_widget_694377998318d390ecf6f0d6feaad39a</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2026-11-04 10:21:06</sys_updated_on>
+        <template><![CDATA[
+
+<div class="lm-dashboard">
+
+    <!-- ==========================================
+         1. HEADER
+    =========================================== -->
+
+    <header class="lm-header">
+
+        <div class="lm-header-inner">
+
+            <div class="lm-brand">
+
+                <div class="lm-brand-icon">
+                    <i class="fa fa-calendar-check-o"></i>
+                </div>
+
+                <div>
+                    <h2>Leave Management</h2>
+                    <p>Employee Leave Management Portal</p>
+                </div>
+
+            </div>
+
+            <div class="lm-header-right">
+
+                <span class="lm-welcome">
+                    Welcome, <strong>{{c.userName}}</strong>
+                </span>
+
+                <button class="lm-refresh-btn"
+                        ng-click="c.refreshDashboard()"
+                        ng-disabled="c.loading">
+
+                    <i class="fa fa-refresh"></i>
+                    {{c.loading ? 'Refreshing...' : 'Refresh'}}
+
+                </button>
+
+            </div>
+
+        </div>
+
+    </header>
+
+
+    <!-- ==========================================
+         2. SUCCESS MESSAGE
+    =========================================== -->
+
+    <div class="lm-success-alert"
+         ng-if="c.successMessage">
+
+        <span>
+            <i class="fa fa-check-circle"></i>
+            {{c.successMessage}}
+        </span>
+
+    </div>
+
+
+    <!-- ==========================================
+         3. ERROR MESSAGE
+    =========================================== -->
+
+    <div class="alert alert-danger"
+         ng-if="c.errorMessage">
+
+        <i class="fa fa-exclamation-circle"></i>
+        {{c.errorMessage}}
+
+    </div>
+
+
+    <!-- ==========================================
+         4. EMPLOYEE WARNING
+    =========================================== -->
+
+    <div class="alert alert-warning"
+         ng-if="!c.employeeFound">
+
+        <i class="fa fa-exclamation-triangle"></i>
+        Employee record not found. Please contact the administrator.
+
+    </div>
+
+
+    <main class="lm-main"
+          ng-if="c.employeeFound">
+
+
+        <!-- ==========================================
+             5. LEAVE BALANCE
+        =========================================== -->
+
+        <section class="lm-balance-panel">
+
+            <div class="lm-balance-heading">
+
+                <h3>My Leave Balance</h3>
+
+                <p>
+                    Available leave entitlement for {{c.currentYear}}
+                </p>
+
+            </div>
+
+
+            <div class="lm-balance-items"
+                 ng-if="c.leaveBalances.length > 0">
+
+                <div class="lm-balance-item"
+                     ng-repeat="balance in c.leaveBalances track by balance.sysId">
+
+                    <div class="lm-balance-name">
+                        {{balance.leaveType}}
+                    </div>
+
+                    <div class="lm-balance-number">
+                        {{balance.availableDays}}
+                    </div>
+
+                </div>
+
+            </div>
+
+
+            <div class="lm-balance-empty"
+                 ng-if="!c.leaveBalances.length">
+
+                No leave balance records found.
+
+            </div>
+
+        </section>
+
+
+        <!-- ==========================================
+             6. NAVIGATION TABS
+        =========================================== -->
+
+        <nav class="lm-tabs">
+
+            <button
+                ng-class="{'active': c.activeTab === 'apply'}"
+                ng-click="c.activeTab = 'apply'">
+
+                <i class="fa fa-plus-circle"></i>
+                Apply Leave
+
+            </button>
+
+
+            <button
+                ng-class="{'active': c.activeTab === 'calendar'}"
+                ng-click="c.activeTab = 'calendar'">
+
+                <i class="fa fa-calendar"></i>
+                Calendar
+
+            </button>
+
+
+            <button
+                ng-class="{'active': c.activeTab === 'requests'}"
+                ng-click="c.activeTab = 'requests'">
+
+                <i class="fa fa-list-alt"></i>
+                My Requests
+
+            </button>
+
+
+            <button
+                ng-class="{'active': c.activeTab === 'approvals'}"
+                ng-click="c.activeTab = 'approvals'">
+
+                <i class="fa fa-check-square-o"></i>
+                Team Approvals
+
+                <span class="lm-tab-count"
+                      ng-if="c.teamApprovals.length">
+
+                    {{c.teamApprovals.length}}
+
+                </span>
+
+            </button>
+
+        </nav>
+
+
+        <!-- ==========================================
+             7. APPLY LEAVE
+        =========================================== -->
+
+        <section class="lm-tab-content"
+                 ng-if="c.activeTab === 'apply'">
+
+            <div class="lm-section-heading">
+
+                <h3>Apply for Leave</h3>
+
+                <p>
+                    Fill in the details below to submit your leave request.
+                </p>
+
+            </div>
+
+
+            <div class="lm-apply-layout">
+
+
+                <!-- LEAVE FORM -->
+
+                <div class="lm-form-card">
+
+                    <form name="leaveForm"
+                          ng-submit="c.submitLeave()"
+                          novalidate>
+
+
+                        <!-- LEAVE TYPE -->
+
+                        <div class="form-group">
+
+                            <label>
+                                Leave Type
+                                <span class="lm-required">*</span>
+                            </label>
+
+                            <select
+                                class="form-control"
+                                name="leaveType"
+                                ng-model="c.leaveForm.leaveType"
+                                ng-options="type.sysId as type.name for type in c.leaveTypes"
+                                required>
+
+                                <option value="">
+                                    Select Leave Type
+                                </option>
+
+                            </select>
+
+                        </div>
+
+
+                        <!-- DATE FIELDS -->
+
+                        <div class="lm-date-row">
+
+                            <div class="form-group">
+
+                                <label>
+                                    Start Date
+                                    <span class="lm-required">*</span>
+                                </label>
+
+                                <input
+                                    type="date"
+                                    class="form-control"
+                                    name="startDate"
+                                    ng-model="c.leaveForm.startDate"
+                                    ng-change="c.calculateWorkingDays()"
+                                    required>
+
+                            </div>
+
+
+                            <div class="form-group">
+
+                                <label>
+                                    End Date
+                                    <span class="lm-required">*</span>
+                                </label>
+
+                                <input
+                                    type="date"
+                                    class="form-control"
+                                    name="endDate"
+                                    ng-model="c.leaveForm.endDate"
+                                    ng-change="c.calculateWorkingDays()"
+                                    required>
+
+                            </div>
+
+                        </div>
+
+
+                        <!-- DATE ERROR -->
+
+                        <div class="lm-date-error"
+                             ng-if="c.dateError">
+
+                            <i class="fa fa-exclamation-circle"></i>
+
+                            {{c.dateError}}
+
+                        </div>
+
+
+                        <!-- REASON -->
+
+                        <div class="form-group">
+
+                            <label>
+                                Reason for Leave
+                                <span class="lm-required">*</span>
+                            </label>
+
+                            <textarea
+                                class="form-control"
+                                name="reason"
+                                rows="4"
+                                maxlength="1000"
+                                ng-model="c.leaveForm.reason"
+                                placeholder="Enter the reason for your leave..."
+                                required>
+                            </textarea>
+
+                        </div>
+
+
+                        <!-- FORM BUTTONS -->
+
+                        <div class="lm-form-actions">
+
+                            <button
+                                type="button"
+                                class="lm-clear-btn"
+                                ng-click="c.clearForm()">
+
+                                <i class="fa fa-refresh"></i>
+                                Clear
+
+                            </button>
+
+
+                            <button
+                                type="submit"
+                                class="lm-submit-btn"
+                                ng-disabled="c.submitting || leaveForm.$invalid">
+
+                                <i class="fa fa-paper-plane"></i>
+
+                                {{c.submitting ? 'Submitting...' : 'Submit Leave'}}
+
+                            </button>
+
+                        </div>
+
+                    </form>
+
+                </div>
+
+
+                <!-- WORKING DAYS CARD -->
+
+                <aside class="lm-days-card">
+
+                    <div class="lm-days-icon">
+                        <i class="fa fa-calendar-check-o"></i>
+                    </div>
+
+                    <h4>Leave Duration</h4>
+
+                    <div class="lm-days-number">
+                        {{c.workingDays || 0}}
+                    </div>
+
+                    <p>Working Days</p>
+
+                    <div class="lm-days-divider"></div>
+
+                    <small>
+                        Saturdays and Sundays are excluded from this estimate.
+                    </small>
+
+                </aside>
+
+            </div>
+
+        </section>
+
+
+        <!-- ==========================================
+             8. CALENDAR
+        =========================================== -->
+
+        <section class="lm-tab-content"
+                 ng-if="c.activeTab === 'calendar'">
+
+            <div class="lm-section-heading">
+
+                <h3>Leave Calendar</h3>
+
+                <p>
+                    View your leave request schedule.
+                </p>
+
+            </div>
+
+
+            <div class="lm-calendar-card">
+
+                <div class="lm-calendar-header">
+
+                    <button
+                        type="button"
+                        class="lm-calendar-nav"
+                        ng-click="c.previousMonth()">
+
+                        <i class="fa fa-chevron-left"></i>
+
+                    </button>
+
+
+                    <h3>{{c.calendarMonth}}</h3>
+
+
+                    <button
+                        type="button"
+                        class="lm-calendar-nav"
+                        ng-click="c.nextMonth()">
+
+                        <i class="fa fa-chevron-right"></i>
+
+                    </button>
+
+                </div>
+
+
+                <div class="lm-calendar-legend">
+
+                    <span>
+                        <i class="lm-dot approved"></i>
+                        Approved
+                    </span>
+
+                    <span>
+                        <i class="lm-dot pending"></i>
+                        Pending
+                    </span>
+
+                    <span>
+                        <i class="lm-dot rejected"></i>
+                        Rejected
+                    </span>
+
+                </div>
+
+
+                <div class="lm-calendar-placeholder"
+                     ng-if="!c.myRequests.length">
+
+                    <i class="fa fa-calendar"></i>
+
+                    <h4>No Leave Requests</h4>
+
+                    <p>
+                        Your leave requests will appear here.
+                    </p>
+
+                </div>
+
+            </div>
+
+
+            <!-- CALENDAR REQUEST HISTORY -->
+
+            <div class="lm-calendar-requests"
+                 ng-if="c.myRequests.length">
+
+                <h4>My Leave Requests</h4>
+
+                <div class="table-responsive">
+
+                    <table class="lm-table">
+
+                        <thead>
+
+                            <tr>
+                                <th>Request Number</th>
+                                <th>Leave Type</th>
+                                <th>Start Date</th>
+                                <th>End Date</th>
+                                <th>Status</th>
+                            </tr>
+
+                        </thead>
+
+
+                        <tbody>
+
+                            <tr ng-repeat="request in c.myRequests track by request.sysId">
+
+                                <td>{{request.number}}</td>
+
+                                <td>{{request.leaveType}}</td>
+
+                                <td>{{request.startDate}}</td>
+
+                                <td>{{request.endDate}}</td>
+
+                                <td>
+
+                                    <span
+                                        class="lm-status"
+                                        ng-class="request.statusClass">
+
+                                        {{request.status}}
+
+                                    </span>
+
+                                </td>
+
+                            </tr>
+
+                        </tbody>
+
+                    </table>
+
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <!-- ==========================================
+             9. MY REQUESTS
+        =========================================== -->
+
+        <section class="lm-tab-content"
+                 ng-if="c.activeTab === 'requests'">
+
+            <div class="lm-section-heading">
+
+                <h3>My Leave Requests</h3>
+
+                <p>
+                    Track your leave applications and their status.
+                </p>
+
+            </div>
+
+
+            <div class="lm-table-card">
+
+
+                <!-- REQUEST TOOLBAR -->
+
+                <div class="lm-table-toolbar">
+
+                    <div>
+
+                        <h4>Request History</h4>
+
+                        <span>
+                            {{(c.myRequests | filter:c.filterRequests).length}}
+                            requests found
+                        </span>
+
+                    </div>
+
+                </div>
+
+
+                <!-- SEARCH AND STATUS FILTERS -->
+
+                <div class="lm-request-filters">
+
+
+                    <div class="lm-search-box">
+
+                        <i class="fa fa-search"></i>
+
+                        <input
+                            type="text"
+                            ng-model="c.requestSearch"
+                            placeholder="Search request number or leave type...">
+
+                    </div>
+
+
+                    <select
+                        class="lm-status-filter"
+                        ng-model="c.statusFilter">
+
+                        <option value="">
+                            All Statuses
+                        </option>
+
+                        <option value="pending">
+                            Pending
+                        </option>
+
+                        <option value="submitted">
+                            Submitted
+                        </option>
+
+                        <option value="approved">
+                            Approved
+                        </option>
+
+                        <option value="rejected">
+                            Rejected
+                        </option>
+
+                        <option value="cancelled">
+                            Cancelled
+                        </option>
+
+                    </select>
+
+
+                    <button
+                        type="button"
+                        class="lm-clear-btn"
+                        ng-click="c.clearRequestFilters()">
+
+                        <i class="fa fa-refresh"></i>
+                        Clear Filters
+
+                    </button>
+
+                </div>
+
+
+                <!-- REQUEST TABLE -->
+
+                <div class="table-responsive">
+
+                    <table class="lm-table">
+
+                        <thead>
+
+                            <tr>
+
+                                <th>Request Number</th>
+
+                                <th>Leave Type</th>
+
+                                <th>Start Date</th>
+
+                                <th>End Date</th>
+
+                                <th>Days</th>
+
+                                <th>Status</th>
+
+                                <th>Manager Comments</th>
+
+                            </tr>
+
+                        </thead>
+
+
+                        <tbody>
+
+                            <tr
+                                ng-repeat="request in c.myRequests | filter:c.filterRequests track by request.sysId">
+
+                                <td>
+                                    <strong>{{request.number}}</strong>
+                                </td>
+
+                                <td>{{request.leaveType}}</td>
+
+                                <td>{{request.startDate}}</td>
+
+                                <td>{{request.endDate}}</td>
+
+                                <td>{{request.days}}</td>
+
+                                <td>
+
+                                    <span
+                                        class="lm-status"
+                                        ng-class="request.statusClass">
+
+                                        {{request.status}}
+
+                                    </span>
+
+                                </td>
+
+                                <td>
+                                    {{request.comments || '-'}}
+                                </td>
+
+                            </tr>
+
+
+                            <!-- NO REQUESTS -->
+
+                            <tr ng-if="!c.myRequests.length">
+
+                                <td colspan="7" class="lm-empty">
+
+                                    <i class="fa fa-info-circle"></i>
+
+                                    No leave requests found.
+
+                                </td>
+
+                            </tr>
+
+
+                            <!-- NO MATCHING REQUESTS -->
+
+                            <tr
+                                ng-if="c.myRequests.length &&
+                                !(c.myRequests | filter:c.filterRequests).length">
+
+                                <td colspan="7" class="lm-empty">
+
+                                    <i class="fa fa-search"></i>
+
+                                    No matching requests found.
+
+                                </td>
+
+                            </tr>
+
+                        </tbody>
+
+                    </table>
+
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <!-- ==========================================
+             10. TEAM APPROVALS
+        =========================================== -->
+
+        <section class="lm-tab-content"
+                 ng-if="c.activeTab === 'approvals'">
+
+            <div class="lm-section-heading">
+
+                <h3>Team Approvals</h3>
+
+                <p>
+                    Review pending leave requests from your team.
+                </p>
+
+            </div>
+
+
+            <!-- APPROVAL TOOLBAR -->
+
+            <div class="lm-table-toolbar">
+
+                <div>
+
+                    <h4>Pending Requests</h4>
+
+                    <span>
+                        {{(c.teamApprovals | filter:c.filterApprovals).length}}
+                        pending requests
+                    </span>
+
+                </div>
+
+
+                <div class="lm-search-box">
+
+                    <i class="fa fa-search"></i>
+
+                    <input
+                        type="text"
+                        ng-model="c.approvalSearch"
+                        placeholder="Search team requests...">
+
+                </div>
+
+            </div>
+
+
+            <!-- APPROVAL LIST -->
+
+            <div class="lm-approval-list">
+
+
+                <div
+                    class="lm-approval-card"
+                    ng-repeat="approval in c.teamApprovals | filter:c.filterApprovals track by approval.approvalId">
+
+
+                    <!-- APPROVAL HEADER -->
+
+                    <div class="lm-approval-top">
+
+                        <div>
+
+                            <h4>
+                                {{approval.employee}}
+                            </h4>
+
+                            <span class="lm-approval-type">
+                                {{approval.leaveType}}
+                            </span>
+
+                        </div>
+
+
+                        <span class="lm-status status-pending">
+                            Pending
+                        </span>
+
+                    </div>
+
+
+                    <!-- APPROVAL DETAILS -->
+
+                    <div class="lm-approval-details">
+
+
+                        <div>
+
+                            <label>Request Number</label>
+
+                            <p>{{approval.number}}</p>
+
+                        </div>
+
+
+                        <div>
+
+                            <label>Start Date</label>
+
+                            <p>{{approval.startDate}}</p>
+
+                        </div>
+
+
+                        <div>
+
+                            <label>End Date</label>
+
+                            <p>{{approval.endDate}}</p>
+
+                        </div>
+
+
+                        <div>
+
+                            <label>Working Days</label>
+
+                            <p>{{approval.days}}</p>
+
+                        </div>
+
+                    </div>
+
+
+                    <!-- REASON -->
+
+                    <div class="lm-approval-reason">
+
+                        <label>Reason for Leave</label>
+
+                        <p>{{approval.reason}}</p>
+
+                    </div>
+
+
+                    <!-- MANAGER COMMENTS -->
+
+                    <div class="lm-manager-comment">
+
+                        <label>Manager Comments</label>
+
+                        <textarea
+                            ng-model="approval.comments"
+                            rows="2"
+                            maxlength="1000"
+                            placeholder="Enter approval or rejection comments...">
+                        </textarea>
+
+                    </div>
+
+
+                    <!-- APPROVE AND REJECT BUTTONS -->
+
+                    <div class="lm-approval-actions">
+
+
+                        <button
+                            type="button"
+                            class="lm-approve-btn"
+                            ng-click="c.approveLeave(approval)"
+                            ng-disabled="approval.processing || c.processingApproval">
+
+                            <i class="fa fa-check"></i>
+
+                            {{approval.processing ? 'Processing...' : 'Approve'}}
+
+                        </button>
+
+
+                        <button
+                            type="button"
+                            class="lm-reject-btn"
+                            ng-click="c.rejectLeave(approval)"
+                            ng-disabled="approval.processing || c.processingApproval">
+
+                            <i class="fa fa-times"></i>
+
+                            {{approval.processing ? 'Processing...' : 'Reject'}}
+
+                        </button>
+
+                    </div>
+
+                </div>
+
+
+                <!-- NO PENDING APPROVALS -->
+
+                <div
+                    class="lm-empty-approvals"
+                    ng-if="!c.teamApprovals.length">
+
+                    <i class="fa fa-check-circle"></i>
+
+                    <h4>No Pending Approvals</h4>
+
+                    <p>
+                        There are currently no leave requests waiting for your approval.
+                    </p>
+
+                </div>
+
+
+                <!-- NO SEARCH MATCH -->
+
+                <div
+                    class="lm-empty-approvals"
+                    ng-if="c.teamApprovals.length &&
+                    !(c.teamApprovals | filter:c.filterApprovals).length">
+
+                    <i class="fa fa-search"></i>
+
+                    <h4>No Matching Requests</h4>
+
+                    <p>
+                        Try another employee name, request number, or leave type.
+                    </p>
+
+                </div>
+
+            </div>
+
+        </section>
+
+    </main>
+
+
+    <!-- ==========================================
+         11. FOOTER
+    =========================================== -->
+
+    <footer class="lm-footer">
+
+        <p>
+            Employee Leave Management System
+        </p>
+
+    </footer>
+
+</div>
+]]></template>
+    </sp_widget>
+    <sys_es_latest_script action="INSERT_OR_UPDATE">
+        <id>694377998318d390ecf6f0d6feaad39a</id>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2026-11-01 10:34:26</sys_created_on>
+        <sys_id>e54377998318d390ecf6f0d6feaad3a1</sys_id>
+        <sys_mod_count>0</sys_mod_count>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2026-11-01 10:34:26</sys_updated_on>
+        <table>sp_widget</table>
+        <use_es_latest>true</use_es_latest>
+    </sys_es_latest_script>
+</record_update>

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?><record_update sys_domain="global" table="par_dashboard_tab">
+    <par_dashboard_tab action="INSERT_OR_UPDATE">
+        <active>true</active>
+        <background_color/>
+        <dashboard display_value="Leave Management Dashboard">363fe8b683905f90ecf6f0d6feaad329</dashboard>
+        <name>New Tab 3</name>
+        <order>0</order>
+        <sys_class_name>par_dashboard_tab</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2026-11-05 12:08:48</sys_created_on>
+        <sys_domain>global</sys_domain>
+        <sys_domain_path>/</sys_domain_path>
+        <sys_id>073fac3a83905f90ecf6f0d6feaad3cd</sys_id>
+        <sys_mod_count>0</sys_mod_count>
+        <sys_name>New Tab 3</sys_name>
+        <sys_overrides/>
+        <sys_package display_value="Leave Management System" source="x_2132473_leave_0">fe945245835c1390ecf6f0d6feaad3ad</sys_package>
+        <sys_policy/>
+        <sys_scope display_value="Leave Management System">fe945245835c1390ecf6f0d6feaad3ad</sys_scope>
+        <sys_update_name>par_dashboard_tab_073fac3a83905f90ecf6f0d6feaad3cd</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2026-11-05 12:08:48</sys_updated_on>
+    </par_dashboard_tab>
+</record_update>

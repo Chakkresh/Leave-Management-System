@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?><database>
+    <element attributes="enforce_dot_walk_cross_scope_access=true" db_object_id="05a062c9839c1390ecf6f0d6feaad313" label="Employee" max_length="40" name="x_2132473_leave_0_employee" type="collection">
+        <element default="true" label="Active" max_length="40" name="active" type="boolean"/>
+        <element display="true" label="User" max_length="32" name="user" reference="sys_user" type="reference"/>
+        <element label="Department" max_length="40" name="department" type="string"/>
+        <element attributes="edge_encryption_enabled=true" default="javascript:global.getNextObjNumberPadded();" label="Employee ID" mandatory="true" max_length="40" name="number" type="string"/>
+        <element label="Manager" max_length="32" name="manager" reference="x_2132473_leave_0_employee" type="reference"/>
+        <index name="index">
+            <element name="manager"/>
+        </index>
+        <index name="index2">
+            <element name="user"/>
+        </index>
+    </element>
+</database>
