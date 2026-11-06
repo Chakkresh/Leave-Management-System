@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?><database>
+    <element attributes="enforce_dot_walk_cross_scope_access=true" db_object_id="fb37aa0983dc1390ecf6f0d6feaad31e" label="Leave Request" max_length="40" name="x_2132473_leave_0_leave_request" type="collection">
+        <element label="Manager comments" max_length="40" name="manager_comments" type="string"/>
+        <element label="Number of Days" max_length="40" name="number_of_days" type="integer"/>
+        <element label="Leave Type" max_length="32" name="leave_type" reference="x_2132473_leave_0_leave_type" type="reference"/>
+        <element choice="3" default="pending" label="Status" max_length="40" name="status" type="choice">
+            <choice>
+                <element inactive_on_update="false" label="Rejected" sequence="2" value="rejected"/>
+                <element inactive_on_update="false" label="Approved" sequence="1" value="approved"/>
+                <element inactive_on_update="false" label="Pending" sequence="0" value="pending"/>
+            </choice>
+        </element>
+        <element label="End Date" mandatory="true" max_length="40" name="end_date" type="glide_date"/>
+        <element label="Employee" max_length="32" name="employee" reference="x_2132473_leave_0_employee" type="reference"/>
+        <element attributes="edge_encryption_enabled=true" default="javascript:global.getNextObjNumberPadded();" label="Request Number" mandatory="true" max_length="40" name="number" type="string"/>
+        <element label="Start Date" mandatory="true" max_length="40" name="start_date" type="glide_date"/>
+        <element label="Reason" mandatory="true" max_length="40" name="reason" type="string"/>
+        <index name="index">
+            <element name="employee"/>
+        </index>
+        <index name="index2">
+            <element name="leave_type"/>
+        </index>
+    </element>
+</database>

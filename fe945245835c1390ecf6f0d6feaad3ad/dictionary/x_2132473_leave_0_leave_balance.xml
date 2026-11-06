@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?><database>
+    <element attributes="enforce_dot_walk_cross_scope_access=true" db_object_id="0c65ee0583dc1390ecf6f0d6feaad32e" label="Leave Balance" max_length="40" name="x_2132473_leave_0_leave_balance" type="collection">
+        <element label="Leave Type" max_length="32" name="leave_type" reference="x_2132473_leave_0_leave_type" type="reference"/>
+        <element label="Employee" max_length="32" name="employee" reference="x_2132473_leave_0_employee" type="reference"/>
+        <element label="Year" max_length="40" name="year" type="glide_date"/>
+        <element default="0" label="Used Days" max_length="40" name="used_days" type="integer"/>
+        <element attributes="edge_encryption_enabled=true" default="javascript:global.getNextObjNumberPadded();" label="Number" max_length="40" name="number" type="string"/>
+        <element default="0" label="Total Entitlement" max_length="40" name="total_entitlement" type="integer"/>
+        <element default="0" label="Available Days" max_length="40" name="available_days" type="integer"/>
+        <index name="index">
+            <element name="employee"/>
+        </index>
+        <index name="index2">
+            <element name="leave_type"/>
+        </index>
+    </element>
+</database>
